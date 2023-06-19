@@ -93,11 +93,11 @@ def Insert2RESULT_F(conn, cursor, df_result):
 
         try:
             cursor.execute("""
-                INSERT INTO RESULT_F (BATCH_RUN_KEY, PARAMETER_KEY, SPECIES_KEY, DATA_SOURCE, DATA_SEQUENCE, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S)
+                INSERT INTO RESULT_F (BATCH_RUN_KEY, PARAMETER_KEY, SPECIES_KEY, DATA_SOURCE, DATA_SEQUENCE, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
                 VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = '{}'), 
                 (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = '{}'),
                 (SELECT isnull(SPECIES_KEY,'-999') FROM SPECIES_D WHERE SPECIES_NM = '{}'),
-                '{}', {}, {}, {}, {}, '{}', '{}', '{}', '{}', {})
+                '{}', {}, {}, {}, {}, '{}', '{}', '{}', '{}', {}, {})
                 """.format(
                 row.BATCH_RUN_ID,
                 row.PARAMETER_NM,
@@ -111,7 +111,8 @@ def Insert2RESULT_F(conn, cursor, df_result):
                 row.DATA_TYPE,
                 row.UNIT_CD,
                 row.RELATIVE_TIME,
-                row.RELATIVE_TIME_S)
+                row.RELATIVE_TIME_S,
+                row.RELATIVE_TIME_HR)
             )
         except pyodbc.IntegrityError as e:
             print("IntegrityError: {}".format(e))
@@ -130,33 +131,33 @@ def BATCH_RUN(df,file_path):
     # else:
     #     value_BATCH_RUN_KEY=df_batchrun_key["BATCH_RUN_KEY"][0]+1
     
-    value_BATCH_RUN_DATE=df.at[2,'Abs. Time (UTC-04 : 00)']
-    value_DESCRIPTION=''
-    value_PURPOSE=''
-    value_BACKGROUND=''
-    value_CONCLUSIONS=''
-    value_NEXT_STEPS=''
+        value_BATCH_RUN_DATE=df.at[2,'Abs. Time (UTC-04 : 00)']
+        value_DESCRIPTION=''
+        value_PURPOSE=''
+        value_BACKGROUND=''
+        value_CONCLUSIONS=''
+        value_NEXT_STEPS=''
 
-    file_segment = file_path.split('\\')
-    idx_experiment=file_segment.index('Experiments')
-    value_USER_NM = file_segment[idx_experiment+1]
-    value_PROJECT_NM = file_segment[idx_experiment+2]
-    value_BATCH_RUN_ID = file_segment[idx_experiment+4].split('.xlsx')[0]
-    value_FILE_NM=file_path
+        file_segment = file_path.split('\\')
+        idx_experiment=file_segment.index('Experiments')
+        value_USER_NM = file_segment[idx_experiment+1]
+        value_PROJECT_NM = file_segment[idx_experiment+2]
+        value_BATCH_RUN_ID = file_segment[idx_experiment+4].split('.xlsx')[0]
+        value_FILE_NM=file_path
 
-    new_rows=[]
-    new_rows.append([value_BATCH_RUN_ID, value_BATCH_RUN_DATE, value_DESCRIPTION, value_PURPOSE, value_BACKGROUND, value_CONCLUSIONS, value_NEXT_STEPS, value_USER_NM, value_PROJECT_NM, value_FILE_NM])
+        new_rows=[]
+        new_rows.append([value_BATCH_RUN_ID, value_BATCH_RUN_DATE, value_DESCRIPTION, value_PURPOSE, value_BACKGROUND, value_CONCLUSIONS, value_NEXT_STEPS, value_USER_NM, value_PROJECT_NM, value_FILE_NM])
 
-    # Create Batch_Run_D Table
-    batchrun_column=['BATCH_RUN_ID','BATCH_RUN_DATE','DESCRIPTION','PURPOSE','BACKGROUND','CONCLUSIONS','NEXT_STEPS','USER_NM', 'PROJECT_NM','FILE_NM']
-    df_batchrun=pd.DataFrame(columns=batchrun_column)
-    new_df = pd.DataFrame(new_rows, columns=df_batchrun.columns)
-    df_batchrun = pd.concat([df_batchrun, new_df], ignore_index=True)
+        # Create Batch_Run_D Table
+        batchrun_column=['BATCH_RUN_ID','BATCH_RUN_DATE','DESCRIPTION','PURPOSE','BACKGROUND','CONCLUSIONS','NEXT_STEPS','USER_NM', 'PROJECT_NM','FILE_NM']
+        df_batchrun=pd.DataFrame(columns=batchrun_column)
+        new_df = pd.DataFrame(new_rows, columns=df_batchrun.columns)
+        df_batchrun = pd.concat([df_batchrun, new_df], ignore_index=True)
 
-    # Insert to SQL
-    conn, cursor= connect2SQL()
-    Insert2BATCH_RUN_D(conn, cursor, df_batchrun)
-    return df_batchrun
+        # Insert to SQL
+        conn, cursor= connect2SQL()
+        Insert2BATCH_RUN_D(conn, cursor, df_batchrun)
+        return df_batchrun
 
 
 def PARAMETER_D(df):
@@ -222,7 +223,7 @@ def RESULT_F(df, df_batchrun, data_source):
     index = 0
 
     # Create RESULT_F Table
-    result_column = ['BATCH_RUN_ID','PARAMETER_NM','SPECIES_NM','DATA_SOURCE','DATA_SEQUENCE','MASTER_VAL','STRING_VAL','NUMERIC_VAL','DATETIME_VAL','DATA_TYPE','UNIT_CD','RELATIVE_TIME','RELATIVE_TIME_S'] # 12 cols
+    result_column = ['BATCH_RUN_ID','PARAMETER_NM','SPECIES_NM','DATA_SOURCE','DATA_SEQUENCE','MASTER_VAL','STRING_VAL','NUMERIC_VAL','DATETIME_VAL','DATA_TYPE','UNIT_CD','RELATIVE_TIME','RELATIVE_TIME_S','RELATIVE_TIME_HR'] # 14 cols
     df_result=pd.DataFrame(columns=result_column)
 
     for row in range(1, df.shape[0], row_interval):
@@ -230,7 +231,8 @@ def RESULT_F(df, df_batchrun, data_source):
         datetime_val = df.at[row, 'Abs. Time (UTC-04 : 00)']
         relative_time = df.at[row, 'Rel. Time']
         relative_time_s = df.at[row, 'Rel. Time (in s)']
-        
+        relative_time_hr = relative_time_s/3600.0
+
         new_rows = []
         current_row = df.iloc[row] # pd.Series
         for col in range(4, df.shape[1]):
@@ -262,11 +264,10 @@ def RESULT_F(df, df_batchrun, data_source):
   
             value_DATA_TYPE = str(type(current_row[col])).replace('\'','')
             value_UNIT_CD = df.at[0, colname]            
-            new_rows.append([value_BATCH_RUN_ID, value_PARAMETER_NM, value_SPECIES_NM, value_DATA_SOURCE, value_DATA_SEQUENCE, value_MASTER_VAL, value_STRING_VAL, value_NUMERIC_VAL, datetime_val, value_DATA_TYPE, value_UNIT_CD, relative_time, relative_time_s])
+            new_rows.append([value_BATCH_RUN_ID, value_PARAMETER_NM, value_SPECIES_NM, value_DATA_SOURCE, value_DATA_SEQUENCE, value_MASTER_VAL, value_STRING_VAL, value_NUMERIC_VAL, datetime_val, value_DATA_TYPE, value_UNIT_CD, relative_time, relative_time_s, relative_time_hr])
 
         new_df = pd.DataFrame(new_rows, columns=df_result.columns)
         df_result = pd.concat([df_result, new_df], ignore_index=True)
-
     return df_result
 
 # MAIN
@@ -274,8 +275,8 @@ IMPORT        = True
 PREPROCESSING = True
 PUSH2SQL      = True
 
-start = 25
-end = 30
+start = 21
+end = 22
 for number in range(start, end):
     # xlsx file search under a folder path
     folder_path = r'\\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-0'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
