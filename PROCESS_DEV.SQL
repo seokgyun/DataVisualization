@@ -1,0 +1,89 @@
+CREATE  TABLE BATCH_RUN_D ( 
+    BATCH_RUN_KEY        int    IDENTITY  NOT NULL,
+    BATCH_RUN_ID         varchar(50)      NOT NULL,
+    BATCH_RUN_DATE       date      NOT NULL,
+    DESCRIPTION          varchar(500)      NULL,
+    PURPOSE              varchar(500)      NULL,
+    BACKGROUND           varchar(500)      NULL,
+    CONCLUSIONS          varchar(500)      NULL,
+    NEXT_STEPS           varchar(500)      NULL,
+    USER_NM              varchar(100)      NULL,
+    PROJECT_NM           varchar(100)      NULL,
+    FILE_NM              varchar(250)      NOT NULL,
+    CONSTRAINT BATCH_RUN_D_PK PRIMARY KEY  ( BATCH_RUN_KEY ) ,
+    CONSTRAINT BATCH_RUN_D_UK1 UNIQUE ( BATCH_RUN_ID ) 
+) ;;
+GO
+
+ 
+
+CREATE  TABLE PARAMETER_D ( 
+    PARAMETER_KEY        int    IDENTITY  NOT NULL,
+    PARAMETER_NM         varchar(100)      NOT NULL,
+    CONSTRAINT PARAMETER_D_PK PRIMARY KEY  ( PARAMETER_KEY ) ,
+    CONSTRAINT PARAMETER_D_UK1 UNIQUE ( PARAMETER_NM ) 
+) ;;
+GO
+
+ 
+
+CREATE  TABLE SPECIES_D ( 
+    SPECIES_KEY          int    IDENTITY  NOT NULL,
+    SPECIES_NM           varchar(200)      NULL,
+    CONSTRAINT SPECIES_D_PK PRIMARY KEY  ( SPECIES_KEY ) ,
+    CONSTRAINT SPECIES_D_UK UNIQUE ( SPECIES_NM ) 
+) ;;
+GO
+
+ 
+
+CREATE  TABLE RESULT_F ( 
+    BATCH_RUN_KEY        int      NOT NULL,
+    PARAMETER_KEY        int      NOT NULL,
+    SPECIES_KEY          int      NOT NULL,
+    DATA_SOURCE          varchar(50)      NOT NULL,
+    DATA_SEQUENCE        int      NOT NULL,
+    MASTER_VAL           varchar(5000)      NULL,
+    STRING_VAL           varchar(5000)      NULL,
+    NUMERIC_VAL          float      NULL,
+    DATETIME_VAL       datetime      NULL,
+    DATA_TYPE            varchar(25)      NULL,
+    UNIT_CD              varchar(100)      NULL,
+    RELATIVE_TIME        varchar(10)      NULL,
+    RELATIVE_TIME_S      int      NULL,
+	RELATIVE_TIME_HR      float      NULL,
+    CONSTRAINT RESULT_F_UK1 UNIQUE ( BATCH_RUN_KEY, PARAMETER_KEY, SPECIES_KEY, DATA_SOURCE, DATA_SEQUENCE ) 
+) ;;
+GO
+
+ 
+
+ALTER TABLE RESULT_F ADD CONSTRAINT [FK INPUT F BATCH RUN D 0] FOREIGN KEY ( BATCH_RUN_KEY ) REFERENCES BATCH_RUN_D( BATCH_RUN_KEY );
+GO
+
+ 
+
+ALTER TABLE RESULT_F ADD CONSTRAINT [FK INPUT F PARAMETER D 0] FOREIGN KEY ( PARAMETER_KEY ) REFERENCES PARAMETER_D( PARAMETER_KEY );
+GO
+
+ 
+
+ALTER TABLE RESULT_F ADD CONSTRAINT [FK RESULT F SPECIES D] FOREIGN KEY ( SPECIES_KEY ) REFERENCES SPECIES_D( SPECIES_KEY );
+GO
+
+ 
+
+INSERT INTO PARAMETER_D (PARAMETER_NM)
+VALUES ('Species.MassFlow');
+INSERT INTO PARAMETER_D (PARAMETER_NM)
+VALUES ('Species.Temperature');
+INSERT INTO PARAMETER_D (PARAMETER_NM)
+VALUES ('Species.TotalMass');
+INSERT INTO PARAMETER_D (PARAMETER_NM)
+VALUES ('Species.TotalVolume');
+
+ 
+
+INSERT INTO SPECIES_D (SPECIES_NM)
+
+VALUES ('None')
