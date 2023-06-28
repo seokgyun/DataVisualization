@@ -1,5 +1,5 @@
-# 060623
-# simple pre-processing for one dataset which fits to Doug's data model
+# 062723
+# work on checking presence of turbidity in excel. if not, add it from xml   
 import os 
 import numpy as np
 import pandas as pd    
@@ -125,39 +125,39 @@ def BATCH_RUN(df,file_path):
     
     # query = 'SELECT BATCH_RUN_KEY FROM BATCH_RUN_D order by BATCH_RUN_KEY DESC'
     # df_batchrun_key = pd.read_sql(query,conn)
-      
+    
     # if df_batchrun_key.shape[0]==0:
     #     value_BATCH_RUN_KEY=1
     # else:
     #     value_BATCH_RUN_KEY=df_batchrun_key["BATCH_RUN_KEY"][0]+1
     
-        value_BATCH_RUN_DATE=df.at[2,'Abs. Time (UTC-04 : 00)']
-        value_DESCRIPTION=''
-        value_PURPOSE=''
-        value_BACKGROUND=''
-        value_CONCLUSIONS=''
-        value_NEXT_STEPS=''
+    value_BATCH_RUN_DATE=df.at[2,'Abs. Time (UTC-04 : 00)']
+    value_DESCRIPTION=''
+    value_PURPOSE=''
+    value_BACKGROUND=''
+    value_CONCLUSIONS=''
+    value_NEXT_STEPS=''
 
-        file_segment = file_path.split('\\')
-        idx_experiment=file_segment.index('Experiments')
-        value_USER_NM = file_segment[idx_experiment+1]
-        value_PROJECT_NM = file_segment[idx_experiment+2]
-        value_BATCH_RUN_ID = file_segment[idx_experiment+4].split('.xlsx')[0]
-        value_FILE_NM=file_path
+    file_segment = file_path.split('\\')
+    idx_experiment=file_segment.index('Experiments')
+    value_USER_NM = file_segment[idx_experiment+1]
+    value_PROJECT_NM = file_segment[idx_experiment+2]
+    value_BATCH_RUN_ID = file_segment[idx_experiment+4].split('.xlsx')[0]
+    value_FILE_NM=file_path
 
-        new_rows=[]
-        new_rows.append([value_BATCH_RUN_ID, value_BATCH_RUN_DATE, value_DESCRIPTION, value_PURPOSE, value_BACKGROUND, value_CONCLUSIONS, value_NEXT_STEPS, value_USER_NM, value_PROJECT_NM, value_FILE_NM])
+    new_rows=[]
+    new_rows.append([value_BATCH_RUN_ID, value_BATCH_RUN_DATE, value_DESCRIPTION, value_PURPOSE, value_BACKGROUND, value_CONCLUSIONS, value_NEXT_STEPS, value_USER_NM, value_PROJECT_NM, value_FILE_NM])
 
-        # Create Batch_Run_D Table
-        batchrun_column=['BATCH_RUN_ID','BATCH_RUN_DATE','DESCRIPTION','PURPOSE','BACKGROUND','CONCLUSIONS','NEXT_STEPS','USER_NM', 'PROJECT_NM','FILE_NM']
-        df_batchrun=pd.DataFrame(columns=batchrun_column)
-        new_df = pd.DataFrame(new_rows, columns=df_batchrun.columns)
-        df_batchrun = pd.concat([df_batchrun, new_df], ignore_index=True)
+    # Create Batch_Run_D Table
+    batchrun_column=['BATCH_RUN_ID','BATCH_RUN_DATE','DESCRIPTION','PURPOSE','BACKGROUND','CONCLUSIONS','NEXT_STEPS','USER_NM', 'PROJECT_NM','FILE_NM']
+    df_batchrun=pd.DataFrame(columns=batchrun_column)
+    new_df = pd.DataFrame(new_rows, columns=df_batchrun.columns)
+    df_batchrun = pd.concat([df_batchrun, new_df], ignore_index=True)
 
-        # Insert to SQL
-        conn, cursor= connect2SQL()
-        Insert2BATCH_RUN_D(conn, cursor, df_batchrun)
-        return df_batchrun
+    # Insert to SQL
+    conn, cursor= connect2SQL()
+    Insert2BATCH_RUN_D(conn, cursor, df_batchrun)
+    return df_batchrun
 
 
 def PARAMETER_D(df):
@@ -173,7 +173,7 @@ def PARAMETER_D(df):
     for parameter in list(df.columns):
         if 'Turbidity' in parameter:
             df=df.rename(columns={parameter:'Turbidity'})
-
+    
     # check if there are new element in parameter
     new_row = []
     for parameter in list(df.columns):
@@ -211,7 +211,7 @@ def SPECIES_D(df):
         if species not in list(df_species["SPECIES_NM"]):
             new_row = [species]
             new_df = pd.DataFrame(new_row, columns = df_species.columns)
-            # insert the new parameter
+            # insert the new parameter into sql server
             Insert2SPECIES_D(conn, cursor, new_df)
             # Update df_species
             df_species = pd.concat([df_species, new_df],ignore_index=True)
@@ -227,7 +227,7 @@ def RESULT_F(df, df_batchrun, data_source):
     df_result=pd.DataFrame(columns=result_column)
 
     for row in range(1, df.shape[0], row_interval):
-        
+        # time values
         datetime_val = df.at[row, 'Abs. Time (UTC-04 : 00)']
         relative_time = df.at[row, 'Rel. Time']
         relative_time_s = df.at[row, 'Rel. Time (in s)']
@@ -270,10 +270,66 @@ def RESULT_F(df, df_batchrun, data_source):
         df_result = pd.concat([df_result, new_df], ignore_index=True)
     return df_result
 
+def check_turbidity(folder_path,df):
+    ''' check if turbidity column is present in the i-control excel file or not.
+    if yes, pass this code. if not, search for the turbidity data from the xml files under the current folder, and add it to df'''
+
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timedelta
+
+    TurbidityInExcel = False
+    for column in df.columns:
+        if "Turbidity" in column:
+            TurbidityInExcel = True
+    
+    TurbidityInExcel = False  
+    if TurbidityInExcel==False:
+        print("Turbidity info is not in the excel file")
+        print("read xml files under the current folder")
+        xml_files = glob.glob(folder_path + "/*.xml")
+
+        for xml_file in xml_files:
+            print("read file: {}".format(xml_file))
+            print("search if the xml file has the turbidity info")
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            Trends = root.find('Trends')
+            for Trend in Trends:
+                if  'Turbidity' in Trend.attrib['Name']:
+                    print("Found the turbidity data: "+Trend.attrib['Name'])
+                    turbidity_raw = Trend
+                    exit_loop = True
+                    break
+            
+            if exit_loop:
+                print("xml read complete")
+                break
+        
+        # make a turbidity list and add data there
+        turbidity = [np.nan for i in range(len(df))]
+        turbidity[0] = Trend.attrib['Unit']
+        for row in range(len(turbidity_raw)):
+            # convert the time string into total seconds
+            time_string = turbidity_raw[row].attrib['T'] # '%H:%M:%S'
+            # Parse the time string into a hour, min, sec
+            hours, minutes, seconds = map(int, time_string.split(':'))
+            # Calculate the total number of seconds
+            total_seconds = timedelta(hours=hours, minutes=minutes, seconds=seconds).total_seconds()
+            # Convert the total seconds to an integer
+            time_seconds = int(total_seconds)
+
+            index = int(time_seconds/2)+1 # data stored every 2 seconds
+            turbidity[index] = float(turbidity_raw[row].text)
+
+        # add a new column to df
+        df["Turbidty_from_xml"] = turbidity
+        print("turbidity insertion into df is complete")
+    return df  
+
 # MAIN
 IMPORT        = True
-PREPROCESSING = True
-PUSH2SQL      = True
+PREPROCESSING = False
+PUSH2SQL      = False
 
 start = 21
 end = 22
@@ -291,6 +347,10 @@ for number in range(start, end):
             print("file path: {}".format(file_path))
             df = pd.read_excel(file_path)
             data_source = 'i-Control' # need to modify later
+            
+            # check the presence of turbidity in i-control excel file
+            df = check_turbidity(folder_path,df)
+
             print("import complete")
 
         if PREPROCESSING:
@@ -298,7 +358,7 @@ for number in range(start, end):
             df_species = SPECIES_D(df) # update SPECIES_D
             df_param, df = PARAMETER_D(df) # update PARAMETER_D
             df_batchrun= BATCH_RUN(df,file_path) # update BATCH_RUN_D
-            df_result =RESULT_F(df, df_batchrun, data_source)   
+            df_result =RESULT_F(df, df_batchrun, data_source)
             print("PREPROCESSING complete")
 
         if PUSH2SQL:
