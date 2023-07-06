@@ -1,5 +1,5 @@
-# 062723
-# work on checking presence of turbidity in excel. if not, add it from xml   
+# 062823
+# ADDED FACT_ROW_SEQ IN RESULT_F; ADDED ASSOCIATION TABLE; ADDED Insert2RESULT_F_EXECUTEMANY
 import os 
 import numpy as np
 import pandas as pd    
@@ -39,23 +39,23 @@ def Insert2PARAMETER_D(conn, cursor, df_param):
     
     print("Insertion attempt to PARAMETER_D is complete")
 
-## insert data into SPECIES_D
-def Insert2SPECIES_D(conn, cursor, df_species):
-    print("Insertion attempt to SPECIES_D")
-    for row in df_species.itertuples(index=False):
+## insert data into component_D
+def Insert2COMPONENT_D(conn, cursor, df_component):
+    print("Insertion attempt to component_D")
+    for row in df_component.itertuples(index=False):
         print(row)
         try:
             cursor.execute('''
-                INSERT INTO SPECIES_D ( SPECIES_NM)
+                INSERT INTO component_D ( component_NM)
                 VALUES ( ?)
                 ''',
-                row.SPECIES_NM
+                row.component_NM
             )
             conn.commit()
         except pyodbc.IntegrityError as e:
             print("IntegrityError: {}".format(e))
             conn.rollback()
-    print("Insertion attempt to SPECIES_D is complete")
+    print("Insertion attempt to component_D is complete")
 
 ## insert data into batch_run_D
 def Insert2BATCH_RUN_D(conn, cursor, df_batchrun):
@@ -93,15 +93,15 @@ def Insert2RESULT_F(conn, cursor, df_result):
 
         try:
             cursor.execute("""
-                INSERT INTO RESULT_F (BATCH_RUN_KEY, PARAMETER_KEY, SPECIES_KEY, DATA_SOURCE, DATA_SEQUENCE, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+                INSERT INTO RESULT_F (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
                 VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = '{}'), 
                 (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = '{}'),
-                (SELECT isnull(SPECIES_KEY,'-999') FROM SPECIES_D WHERE SPECIES_NM = '{}'),
+                (SELECT isnull(COMPONENT_KEY,'-999') FROM COMPONENT_D WHERE COMPONENT_NM = '{}'),
                 '{}', {}, {}, {}, {}, '{}', '{}', '{}', '{}', {}, {})
                 """.format(
                 row.BATCH_RUN_ID,
                 row.PARAMETER_NM,
-                row.SPECIES_NM,
+                row.COMPONENT_NM,
                 row.DATA_SOURCE,
                 row.DATA_SEQUENCE,
                 row.MASTER_VAL,
@@ -121,17 +121,11 @@ def Insert2RESULT_F(conn, cursor, df_result):
     print("Insertion attempt to RESULT_F is complete")
 
 def BATCH_RUN(df,file_path):
-    # IMPORT BATCHRUN TABLE FROM SQL
-    
-    # query = 'SELECT BATCH_RUN_KEY FROM BATCH_RUN_D order by BATCH_RUN_KEY DESC'
-    # df_batchrun_key = pd.read_sql(query,conn)
-    
-    # if df_batchrun_key.shape[0]==0:
-    #     value_BATCH_RUN_KEY=1
-    # else:
-    #     value_BATCH_RUN_KEY=df_batchrun_key["BATCH_RUN_KEY"][0]+1
-    
-    value_BATCH_RUN_DATE=df.at[2,'Abs. Time (UTC-04 : 00)']
+    try: 
+        value_BATCH_RUN_DATE = df.at[2, 'Abs. Time (UTC-04 : 00)']
+    except KeyError:
+        value_BATCH_RUN_DATE = df.at[2, 'Abs. Time (UTC-05 : 00)']
+
     value_DESCRIPTION=''
     value_PURPOSE=''
     value_BACKGROUND=''
@@ -192,43 +186,46 @@ def PARAMETER_D(df):
     conn.close()
     return df_param, df
         
-def SPECIES_D(df):
-    # Get the list of species
-    species_name = []
+def COMPONENT_D(df):
+    # Get the list of component
+    component_list = []
     for parameter in list(df.columns):
         if ('TotalMass' in parameter) or ('MassFlow' in parameter) or ('TotalVolume' in parameter) or ('Temperature' in parameter):
-            species_name.append(parameter.split('.')[0])
-    species_name = list(set(species_name))
-    print("Species in this experiment: {}".format(species_name))
+            component_list.append(parameter.split('.')[0])
+    component_list = list(set(component_list))
+    print("component in this experiment: {}".format(component_list))
 
-    # IMPORT SPECIES TABLE FROM SQL
+    # IMPORT component TABLE FROM SQL
     conn, cursor= connect2SQL()
-    query = 'SELECT SPECIES_NM FROM SPECIES_D order by SPECIES_KEY'
-    df_species =pd.read_sql(query,conn)
+    query = 'SELECT component_NM FROM component_D order by component_KEY'
+    df_component =pd.read_sql(query,conn)
 
-    # check if there are new element in species
-    for species in species_name:
-        if species not in list(df_species["SPECIES_NM"]):
-            new_row = [species]
-            new_df = pd.DataFrame(new_row, columns = df_species.columns)
+    # check if there are new element in component
+    for component in component_list:
+        if component not in list(df_component["component_NM"]):
+            new_row = [component]
+            new_df = pd.DataFrame(new_row, columns = df_component.columns)
             # insert the new parameter into sql server
-            Insert2SPECIES_D(conn, cursor, new_df)
-            # Update df_species
-            df_species = pd.concat([df_species, new_df],ignore_index=True)
+            Insert2COMPONENT_D(conn, cursor, new_df)
+            # Update df_component
+            df_component = pd.concat([df_component, new_df],ignore_index=True)
     conn.close()
-    return df_species
+    return df_component, component_list
 
 def RESULT_F(df, df_batchrun, data_source):
     row_interval = 15
     index = 0
 
     # Create RESULT_F Table
-    result_column = ['BATCH_RUN_ID','PARAMETER_NM','SPECIES_NM','DATA_SOURCE','DATA_SEQUENCE','MASTER_VAL','STRING_VAL','NUMERIC_VAL','DATETIME_VAL','DATA_TYPE','UNIT_CD','RELATIVE_TIME','RELATIVE_TIME_S','RELATIVE_TIME_HR'] # 14 cols
+    result_column = ['BATCH_RUN_ID','PARAMETER_NM','COMPONENT_NM','DATA_SOURCE','DATA_SEQUENCE','FACT_ROW_SEQ','MASTER_VAL','STRING_VAL','NUMERIC_VAL','DATETIME_VAL','DATA_TYPE','UNIT_CD','RELATIVE_TIME','RELATIVE_TIME_S','RELATIVE_TIME_HR'] # 14 cols
     df_result=pd.DataFrame(columns=result_column)
 
     for row in range(1, df.shape[0], row_interval):
         # time values
-        datetime_val = df.at[row, 'Abs. Time (UTC-04 : 00)']
+        try: 
+            datetime_val = df.at[row, 'Abs. Time (UTC-04 : 00)']
+        except KeyError:
+            datetime_val = df.at[row, 'Abs. Time (UTC-05 : 00)']
         relative_time = df.at[row, 'Rel. Time']
         relative_time_s = df.at[row, 'Rel. Time (in s)']
         relative_time_hr = relative_time_s/3600.0
@@ -241,22 +238,23 @@ def RESULT_F(df, df_batchrun, data_source):
             # batch_run_ID
             value_BATCH_RUN_ID = df_batchrun["BATCH_RUN_ID"][0]
 
-            # parameter_NM and species_NM
+            # parameter_NM and COMPONENT_NM
             if ('TotalMass' in colname) or ('MassFlow' in colname) or ('TotalVolume' in colname) or ('Temperature' in colname):
-                value_SPECIES_NM = colname.split('.')[0]
-                value_PARAMETER_NM = 'Species.'+colname.split('.')[1]
+                value_COMPONENT_NM = colname.split('.')[0]
+                value_PARAMETER_NM = 'COMPONENT.'+colname.split('.')[1]
             else:
-                value_SPECIES_NM = None
+                value_COMPONENT_NM = 'NotApplied'
                 value_PARAMETER_NM = colname
 
             # data sequence
             index += 1
             value_DATA_SEQUENCE = index
             value_DATA_SOURCE = data_source
-            
+            value_FACT_ROW_SEQ = row
+
             # Values
             if pd.isna(current_row[col]):
-                value_NUMERIC_VAL = 'Null'
+                value_NUMERIC_VAL = -999.999
             else:
                 value_NUMERIC_VAL = current_row[col]
             value_MASTER_VAL = 'Null'
@@ -264,7 +262,7 @@ def RESULT_F(df, df_batchrun, data_source):
   
             value_DATA_TYPE = str(type(current_row[col])).replace('\'','')
             value_UNIT_CD = df.at[0, colname]            
-            new_rows.append([value_BATCH_RUN_ID, value_PARAMETER_NM, value_SPECIES_NM, value_DATA_SOURCE, value_DATA_SEQUENCE, value_MASTER_VAL, value_STRING_VAL, value_NUMERIC_VAL, datetime_val, value_DATA_TYPE, value_UNIT_CD, relative_time, relative_time_s, relative_time_hr])
+            new_rows.append([value_BATCH_RUN_ID, value_PARAMETER_NM, value_COMPONENT_NM, value_DATA_SOURCE, value_DATA_SEQUENCE, value_FACT_ROW_SEQ, value_MASTER_VAL, value_STRING_VAL, value_NUMERIC_VAL, datetime_val, value_DATA_TYPE, value_UNIT_CD, relative_time, relative_time_s, relative_time_hr])
 
         new_df = pd.DataFrame(new_rows, columns=df_result.columns)
         df_result = pd.concat([df_result, new_df], ignore_index=True)
@@ -277,13 +275,13 @@ def check_turbidity(folder_path,df):
     import xml.etree.ElementTree as ET
     from datetime import datetime, timedelta
 
-    TurbidityInExcel = False
     for column in df.columns:
         if "Turbidity" in column:
             TurbidityInExcel = True
-    
-    TurbidityInExcel = False  
-    if TurbidityInExcel==False:
+        else:
+            TurbidityInExcel = False 
+
+    if TurbidityInExcel:
         print("Turbidity info is not in the excel file")
         print("read xml files under the current folder")
         xml_files = glob.glob(folder_path + "/*.xml")
@@ -299,43 +297,133 @@ def check_turbidity(folder_path,df):
                     print("Found the turbidity data: "+Trend.attrib['Name'])
                     turbidity_raw = Trend
                     exit_loop = True
+                    TurbidityInXML = True
                     break
-            
+                else:
+                    exit_loop = False
             if exit_loop:
                 print("xml read complete")
                 break
-        
-        # make a turbidity list and add data there
-        turbidity = [np.nan for i in range(len(df))]
-        turbidity[0] = Trend.attrib['Unit']
-        for row in range(len(turbidity_raw)):
-            # convert the time string into total seconds
-            time_string = turbidity_raw[row].attrib['T'] # '%H:%M:%S'
-            # Parse the time string into a hour, min, sec
-            hours, minutes, seconds = map(int, time_string.split(':'))
-            # Calculate the total number of seconds
-            total_seconds = timedelta(hours=hours, minutes=minutes, seconds=seconds).total_seconds()
-            # Convert the total seconds to an integer
-            time_seconds = int(total_seconds)
+            else:
+                print("No turbidity data in the xml file")
+                TurbidityInXML = False
 
-            index = int(time_seconds/2)+1 # data stored every 2 seconds
-            turbidity[index] = float(turbidity_raw[row].text)
+        if TurbidityInXML:
+            # make a turbidity list and add data there
+            turbidity = [np.nan for i in range(len(df))]
+            turbidity[0] = Trend.attrib['Unit']
+            for row in range(len(turbidity_raw)):
+                # convert the time string into total seconds
+                time_string = turbidity_raw[row].attrib['T'] # '%H:%M:%S'
+                # Parse the time string into a hour, min, sec
+                hours, minutes, seconds = map(int, time_string.split(':'))
+                # Calculate the total number of seconds
+                total_seconds = timedelta(hours=hours, minutes=minutes, seconds=seconds).total_seconds()
+                # Convert the total seconds to an integer
+                time_seconds = int(total_seconds)
 
-        # add a new column to df
-        df["Turbidty_from_xml"] = turbidity
-        print("turbidity insertion into df is complete")
+                index = int(time_seconds/2)+1 # data stored every 2 seconds
+                turbidity[index] = float(turbidity_raw[row].text)
+
+            # add a new column to df
+            df["Turbidty_from_xml"] = turbidity
+            print("turbidity insertion into df is complete")
     return df  
+
+def BATCH_COMPONENT_ASSOC(df_batchrun,component_list):
+    
+    df_batch_component_assoc=pd.DataFrame()
+    for component in component_list:
+        # make the batch_component_assoc table
+        new_row = {'BATCH_RUN_ID': df_batchrun["BATCH_RUN_ID"], 'COMPONENT_NM': component}
+        new_df = pd.DataFrame(new_row, columns = ['BATCH_RUN_ID','COMPONENT_NM'])
+        df_batch_component_assoc = pd.concat([df_batch_component_assoc, new_df],ignore_index=True)
+
+    print(df_batch_component_assoc)
+
+    # IMPORT component TABLE FROM SQL
+    conn, cursor= connect2SQL()
+    print("Insertion attempt to BATCH_COMPONENT_ASSOC_D")
+    for row in df_batch_component_assoc.itertuples(index=False):
+        print(row)
+        try:
+            cursor.execute("""
+                INSERT INTO BATCH_COMPONENT_ASSOC_D (BATCH_RUN_KEY, COMPONENT_KEY)
+                VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID='{}'),
+                (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM='{}'))
+                """.format(
+                row.BATCH_RUN_ID,
+                row.COMPONENT_NM
+                )
+            )
+            
+            conn.commit()
+        except pyodbc.IntegrityError as e:
+            print("IntegrityError: {}".format(e))
+            conn.rollback()
+    print("Insertion attempt to BATCH_COMPONENT_ASSOC_D is complete")    
+    conn.close()
+
+def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
+    conn, cursor= connect2SQL()
+    print("Insertion attempt to RESULT_F")
+    idx = 0
+    params_list = []
+
+    for row in df_result.itertuples(index=False):
+        idx += 1
+        #if idx % 1000 == 0:
+        #   print("reading RESULT_F... row={}".format(idx))
+        params = (
+            row.BATCH_RUN_ID,
+            row.PARAMETER_NM,
+            row.COMPONENT_NM,
+            row.DATA_SOURCE,
+            row.DATA_SEQUENCE,
+            row.FACT_ROW_SEQ,
+            row.MASTER_VAL,
+            row.STRING_VAL,
+            row.NUMERIC_VAL,
+            row.DATETIME_VAL,
+            row.DATA_TYPE,
+            row.UNIT_CD,
+            row.RELATIVE_TIME,
+            row.RELATIVE_TIME_S,
+            row.RELATIVE_TIME_HR
+        )
+        params_list.append(params)
+
+    try:
+        query = """
+            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+            VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = ?), 
+            (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
+            (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.fast_executemany = False
+        cursor.executemany(query, params_list)
+        conn.commit()
+
+        print("Insertion attempt to RESULT_F is complete")
+
+    except pyodbc.IntegrityError as e:
+        print("IntegrityError: {}".format(e))
+        conn.rollback()
+
 
 # MAIN
 IMPORT        = True
-PREPROCESSING = False
-PUSH2SQL      = False
+PREPROCESSING = True
+PUSH2SQL      = True
+PXRD          = True
 
-start = 21
-end = 22
+start = 1
+end = 2
 for number in range(start, end):
     # xlsx file search under a folder path
-    folder_path = r'\\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-0'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
+    
+    folder_path = r'\\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-00'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
     print("search excel files under the folder: {}".format(folder_path))
     # Use the glob function to search for .xlsx files in the folder
     xlsx_files = glob.glob(folder_path + "/*.xlsx")
@@ -350,19 +438,23 @@ for number in range(start, end):
             
             # check the presence of turbidity in i-control excel file
             df = check_turbidity(folder_path,df)
-
             print("import complete")
 
         if PREPROCESSING:
             print("PREPROCESSING start")
-            df_species = SPECIES_D(df) # update SPECIES_D
+            df_component, component_list = COMPONENT_D(df) # update COMPONENT_D
             df_param, df = PARAMETER_D(df) # update PARAMETER_D
             df_batchrun= BATCH_RUN(df,file_path) # update BATCH_RUN_D
+            BATCH_COMPONENT_ASSOC(df_batchrun,component_list)
             df_result =RESULT_F(df, df_batchrun, data_source)
             print("PREPROCESSING complete")
 
         if PUSH2SQL:
             conn, cursor= connect2SQL()
-            Insert2RESULT_F(conn, cursor, df_result)
+            Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result)
             conn.close()
             print("Disconnected from SQL")
+
+        #if PXRD:
+
+        
