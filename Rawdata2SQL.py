@@ -1,5 +1,5 @@
 # 070723
-# ADDED SYNONYM TABLE; ADDED executemany; Will ADD PXRD; will APPLY FAST LOADING 
+# APPLIED FAST_EXECUTEMANY 
 import os 
 import numpy as np
 import pandas as pd    
@@ -8,17 +8,17 @@ import openpyxl
 import xml.etree.ElementTree as ET
 import pyodbc
 import glob
-
+import datetime
 # send the pre-processed data to SQL
 # connect to SQL server
 def connect2SQL():
-    print("Connection attempt to SQL")
+    #print("Connection attempt to SQL")
     conn = pyodbc.connect('Driver={SQL Server};'
                         'Server=ELW12DDB01;' #ELW12DDB01 US-KR5ENN0\SQLEXPRESS
                         'Database=AI_PROCESS_DEV_D;' #AI_PROCESS_DEV_D practice
                         'Trusted_Connection=yes;')
     cursor = conn.cursor()
-    print("Connected to SQL successfully")
+    #print("Connected to SQL successfully")
     return conn, cursor
 
 ## insert data into parameter_D
@@ -43,7 +43,7 @@ def Insert2PARAMETER_D(conn, cursor, df_param):
 def Insert2COMPONENT_D(conn, cursor, df_component):
     print("Insertion attempt to component_D")
     for row in df_component.itertuples(index=False):
-        print(row)
+        #print(row)
         try:
             cursor.execute('''
                 INSERT INTO component_D ( component_NM)
@@ -122,7 +122,7 @@ def Insert2RESULT_F(conn, cursor, df_result):
 
 def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
     conn, cursor= connect2SQL()
-    print("Insertion attempt to RESULT_F")
+    print("Insertion attempt to RESULT_F (EXECUTEMANY)")
     params_list = []
 
     for row in df_result.itertuples(index=False):
@@ -152,6 +152,132 @@ def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
             (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
             (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.fast_executemany = True
+        cursor.executemany(query, params_list)
+        conn.commit()
+
+        print("Insertion attempt to RESULT_F is complete")
+
+    except pyodbc.IntegrityError as e:
+        print("IntegrityError: {}".format(e))
+        conn.rollback()
+def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
+    conn, cursor= connect2SQL()
+    print("Insertion attempt to RESULT_F")
+    idx = 0
+    params_list = []
+
+    for row in df_result.itertuples(index=False):
+        idx += 1
+        #if idx % 1000 == 0:
+        #   print("reading RESULT_F... row={}".format(idx))
+        params = (
+            row.BATCH_RUN_ID,
+            row.PARAMETER_NM,
+            row.COMPONENT_NM,
+            row.DATA_SOURCE,
+            row.DATA_SEQUENCE,
+            row.FACT_ROW_SEQ,
+            row.MASTER_VAL,
+            row.STRING_VAL,
+            row.NUMERIC_VAL,
+            row.DATETIME_VAL,
+            row.DATA_TYPE,
+            row.UNIT_CD,
+            row.RELATIVE_TIME,
+            row.RELATIVE_TIME_S,
+            row.RELATIVE_TIME_HR
+        )
+        params_list.append(params)
+
+    try:
+        query = """
+            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+            VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = ?), 
+            (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
+            (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.fast_executemany = False
+        cursor.executemany(query, params_list)
+        conn.commit()
+
+        print("Insertion attempt to RESULT_F is complete")
+
+    except pyodbc.IntegrityError as e:
+        print("IntegrityError: {}".format(e))
+        conn.rollback()
+
+def Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result):
+    conn, cursor= connect2SQL()
+    print("Insertion attempt to RESULT_F (FAST_EXECUTEMANY)")
+
+    # READ BATCH_RUN_D and merge it with df_result
+    query = """
+            SELECT BATCH_RUN_KEY, BATCH_RUN_ID from AI_PROCESS_DEV_D.dbo.BATCH_RUN_D 
+            """
+    cursor.execute(query)
+    result=cursor.fetchall()
+    columns = [column[0] for column in cursor.description]
+    rows = [list(row) for row in result]
+    mapping_batchrun = pd.DataFrame(rows, columns=columns)
+    #print(mapping_batchrun.head())
+    df_result_new = pd.merge(mapping_batchrun,df_result,on='BATCH_RUN_ID')
+
+    # READ PARAMETER_D and merge it with df_result
+    query = """
+            SELECT PARAMETER_KEY, PARAMETER_NM from AI_PROCESS_DEV_D.dbo.PARAMETER_D 
+            """
+    cursor.execute(query)
+    result=cursor.fetchall()
+    columns = [column[0] for column in cursor.description]
+    rows = [list(row) for row in result]
+    mapping_parameter = pd.DataFrame(rows, columns=columns)
+    #print(mapping_batchrun.head())
+    df_result_new  = pd.merge(mapping_parameter,df_result_new ,on='PARAMETER_NM')
+
+    # READ COMPONENT_D and merge it with df_result
+    query = """
+            SELECT COMPONENT_KEY, COMPONENT_NM from AI_PROCESS_DEV_D.dbo.COMPONENT_D 
+            """
+    cursor.execute(query)
+    result=cursor.fetchall()
+    columns = [column[0] for column in cursor.description]
+    rows = [list(row) for row in result]
+    mapping_component = pd.DataFrame(rows, columns=columns)
+    #print(mapping_batchrun.head())
+    df_result_new  = pd.merge(mapping_component,df_result_new ,on='COMPONENT_NM')
+
+    params_list = []
+
+    for row in df_result_new.itertuples(index=False):
+        # Convert datetime value to desired format
+        datetime_val = datetime.datetime.strptime(row.DATETIME_VAL, '%m/%d/%Y %I:%M:%S %p')
+        formatted_datetime = datetime_val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        params = (
+            row.BATCH_RUN_KEY,
+            row.PARAMETER_KEY,
+            row.COMPONENT_KEY,
+            row.DATA_SOURCE,
+            row.DATA_SEQUENCE,
+            row.FACT_ROW_SEQ,
+            row.MASTER_VAL,
+            row.STRING_VAL,
+            row.NUMERIC_VAL,
+            formatted_datetime,
+            row.DATA_TYPE,
+            row.UNIT_CD,
+            row.RELATIVE_TIME,
+            row.RELATIVE_TIME_S,
+            row.RELATIVE_TIME_HR
+        )
+        params_list.append(params)
+
+    try:
+        query = """
+            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+            VALUES (?,?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.fast_executemany = True
         cursor.executemany(query, params_list)
@@ -264,7 +390,6 @@ def PARAMETER_D(df):
                 Insert2PARAMETER_D(conn, cursor, new_df)
                 # Update df_param
                 df_param = pd.concat([df_param, new_df],ignore_index=True)
-
     conn.close()
     return df_param, df
         
@@ -445,53 +570,6 @@ def BATCH_COMPONENT_ASSOC(df_batchrun,component_list):
             conn.rollback()
     print("Insertion attempt to BATCH_COMPONENT_ASSOC_D is complete")    
     conn.close()
-
-def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
-    conn, cursor= connect2SQL()
-    print("Insertion attempt to RESULT_F")
-    idx = 0
-    params_list = []
-
-    for row in df_result.itertuples(index=False):
-        idx += 1
-        #if idx % 1000 == 0:
-        #   print("reading RESULT_F... row={}".format(idx))
-        params = (
-            row.BATCH_RUN_ID,
-            row.PARAMETER_NM,
-            row.COMPONENT_NM,
-            row.DATA_SOURCE,
-            row.DATA_SEQUENCE,
-            row.FACT_ROW_SEQ,
-            row.MASTER_VAL,
-            row.STRING_VAL,
-            row.NUMERIC_VAL,
-            row.DATETIME_VAL,
-            row.DATA_TYPE,
-            row.UNIT_CD,
-            row.RELATIVE_TIME,
-            row.RELATIVE_TIME_S,
-            row.RELATIVE_TIME_HR
-        )
-        params_list.append(params)
-
-    try:
-        query = """
-            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
-            VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = ?), 
-            (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
-            (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        cursor.fast_executemany = False
-        cursor.executemany(query, params_list)
-        conn.commit()
-
-        print("Insertion attempt to RESULT_F is complete")
-
-    except pyodbc.IntegrityError as e:
-        print("IntegrityError: {}".format(e))
-        conn.rollback()
 
 
 # MAIN
