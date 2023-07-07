@@ -1,5 +1,5 @@
-# 062823
-# ADDED FACT_ROW_SEQ IN RESULT_F; ADDED ASSOCIATION TABLE; ADDED Insert2RESULT_F_EXECUTEMANY
+# 070723
+# ADDED SYNONYM TABLE; ADDED executemany; Will ADD PXRD; will APPLY FAST LOADING 
 import os 
 import numpy as np
 import pandas as pd    
@@ -120,6 +120,81 @@ def Insert2RESULT_F(conn, cursor, df_result):
     conn.commit()
     print("Insertion attempt to RESULT_F is complete")
 
+def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
+    conn, cursor= connect2SQL()
+    print("Insertion attempt to RESULT_F")
+    params_list = []
+
+    for row in df_result.itertuples(index=False):
+        params = (
+            row.BATCH_RUN_ID,
+            row.PARAMETER_NM,
+            row.COMPONENT_NM,
+            row.DATA_SOURCE,
+            row.DATA_SEQUENCE,
+            row.FACT_ROW_SEQ,
+            row.MASTER_VAL,
+            row.STRING_VAL,
+            row.NUMERIC_VAL,
+            row.DATETIME_VAL,
+            row.DATA_TYPE,
+            row.UNIT_CD,
+            row.RELATIVE_TIME,
+            row.RELATIVE_TIME_S,
+            row.RELATIVE_TIME_HR
+        )
+        params_list.append(params)
+
+    try:
+        query = """
+            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+            VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = ?), 
+            (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
+            (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.fast_executemany = True
+        cursor.executemany(query, params_list)
+        conn.commit()
+
+        print("Insertion attempt to RESULT_F is complete")
+
+    except pyodbc.IntegrityError as e:
+        print("IntegrityError: {}".format(e))
+        conn.rollback()
+
+def READ_SYNONYM_TABLE():
+    # connect to pyexasol
+    pw='c99Qkdtnseo1!'
+    import pyexasol
+    connection = pyexasol.connect(dsn='dwh-exasol.pd.research.corteva.com/91E262C9BC54480B6077204C444AFEE87B7EE21002FEB25CF1275F9FCD98F657:8563',
+                        user='iqr474',
+                        password=pw,
+                        compression=True)
+    sql = "SELECT * FROM IDW_VW.CP_COMPONENT_SYNONYM_D_VW"
+
+    # read database from exasol
+    result = connection.execute(sql)
+    df_synonym = pd.DataFrame(result.fetchall(), columns=result.col_names)
+    connection.close()
+
+    # make the master_list
+    columns_to_keep = ['COMPONENT_KEY', 'SYNONYM_VAL', 'PREFERRED_FLG']
+    df_master_list = df_synonym[columns_to_keep]
+    df_master_list = df_master_list.loc[df_synonym['PREFERRED_FLG']==True]
+    df_master_list = df_master_list.drop('PREFERRED_FLG', axis = 1)
+    df_master_list.rename(columns={'SYNONYM_VAL':'MASTER_VAL'})
+
+    # make the synonym_list
+    columns_to_keep = ['COMPONENT_KEY', 'SYNONYM_VAL']
+    df_synonym_list = df_synonym[columns_to_keep]
+    df_synonym_list = pd.merge(df_synonym_list, df_master_list, on = 'COMPONENT_KEY')
+    df_synonym_list = df_synonym_list.rename(columns={'COMPONENT_KEY':'COMPONENT_KEY','SYNONYM_VAL_x':'SYNONYM_VAL','SYNONYM_VAL_y':'MASTER_VAL'})
+    df_synonym_list = df_synonym_list.drop('COMPONENT_KEY',axis = 1)
+    #df_synonym_list.head()
+
+    return df_synonym_list
+
 def BATCH_RUN(df,file_path):
     try: 
         value_BATCH_RUN_DATE = df.at[2, 'Abs. Time (UTC-04 : 00)']
@@ -139,6 +214,13 @@ def BATCH_RUN(df,file_path):
     value_BATCH_RUN_ID = file_segment[idx_experiment+4].split('.xlsx')[0]
     value_FILE_NM=file_path
 
+    # Sync with synonym table and put the primary compound name as the project name
+    synonym = READ_SYNONYM_TABLE()
+    for row in range(synonym.shape[0]):
+        if synonym['SYNONYM_VAL'][row] in file_segment[idx_experiment+2]:
+            value_PROJECT_NM = synonym['MASTER_VAL'][row]
+            break
+    
     new_rows=[]
     new_rows.append([value_BATCH_RUN_ID, value_BATCH_RUN_DATE, value_DESCRIPTION, value_PURPOSE, value_BACKGROUND, value_CONCLUSIONS, value_NEXT_STEPS, value_USER_NM, value_PROJECT_NM, value_FILE_NM])
 
