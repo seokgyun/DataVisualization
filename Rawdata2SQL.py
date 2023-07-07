@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 import pyodbc
 import glob
 import datetime
+import time
 # send the pre-processed data to SQL
 # connect to SQL server
 def connect2SQL():
@@ -154,52 +155,6 @@ def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.fast_executemany = True
-        cursor.executemany(query, params_list)
-        conn.commit()
-
-        print("Insertion attempt to RESULT_F is complete")
-
-    except pyodbc.IntegrityError as e:
-        print("IntegrityError: {}".format(e))
-        conn.rollback()
-def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
-    conn, cursor= connect2SQL()
-    print("Insertion attempt to RESULT_F")
-    idx = 0
-    params_list = []
-
-    for row in df_result.itertuples(index=False):
-        idx += 1
-        #if idx % 1000 == 0:
-        #   print("reading RESULT_F... row={}".format(idx))
-        params = (
-            row.BATCH_RUN_ID,
-            row.PARAMETER_NM,
-            row.COMPONENT_NM,
-            row.DATA_SOURCE,
-            row.DATA_SEQUENCE,
-            row.FACT_ROW_SEQ,
-            row.MASTER_VAL,
-            row.STRING_VAL,
-            row.NUMERIC_VAL,
-            row.DATETIME_VAL,
-            row.DATA_TYPE,
-            row.UNIT_CD,
-            row.RELATIVE_TIME,
-            row.RELATIVE_TIME_S,
-            row.RELATIVE_TIME_HR
-        )
-        params_list.append(params)
-
-    try:
-        query = """
-            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
-            VALUES ((SELECT BATCH_RUN_KEY FROM BATCH_RUN_D WHERE BATCH_RUN_ID = ?), 
-            (SELECT PARAMETER_KEY FROM PARAMETER_D WHERE PARAMETER_NM = ?),
-            (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        cursor.fast_executemany = False
         cursor.executemany(query, params_list)
         conn.commit()
 
@@ -406,10 +361,13 @@ def COMPONENT_D(df):
     conn, cursor= connect2SQL()
     query = 'SELECT component_NM FROM component_D order by component_KEY'
     df_component =pd.read_sql(query,conn)
+    df_component_to_list=list(df_component["component_NM"])
+    df_component_to_list = [df_component_to_list[i].lower() for i in range(len(df_component_to_list))]
 
     # check if there are new element in component
     for component in component_list:
-        if component not in list(df_component["component_NM"]):
+        if component.lower() not in df_component_to_list:
+            print("new component: {}".format(component))
             new_row = [component]
             new_df = pd.DataFrame(new_row, columns = df_component.columns)
             # insert the new parameter into sql server
@@ -546,13 +504,13 @@ def BATCH_COMPONENT_ASSOC(df_batchrun,component_list):
         new_df = pd.DataFrame(new_row, columns = ['BATCH_RUN_ID','COMPONENT_NM'])
         df_batch_component_assoc = pd.concat([df_batch_component_assoc, new_df],ignore_index=True)
 
-    print(df_batch_component_assoc)
+    #print(df_batch_component_assoc)
 
     # IMPORT component TABLE FROM SQL
     conn, cursor= connect2SQL()
     print("Insertion attempt to BATCH_COMPONENT_ASSOC_D")
     for row in df_batch_component_assoc.itertuples(index=False):
-        print(row)
+        #print(row)
         try:
             cursor.execute("""
                 INSERT INTO BATCH_COMPONENT_ASSOC_D (BATCH_RUN_KEY, COMPONENT_KEY)
@@ -569,17 +527,16 @@ def BATCH_COMPONENT_ASSOC(df_batchrun,component_list):
             print("IntegrityError: {}".format(e))
             conn.rollback()
     print("Insertion attempt to BATCH_COMPONENT_ASSOC_D is complete")    
-    conn.close()
+    conn.close()       
 
-
-# MAIN
+    # MAIN
 IMPORT        = True
 PREPROCESSING = True
 PUSH2SQL      = True
 PXRD          = True
 
-start = 1
-end = 2
+start = 9
+end = 10
 for number in range(start, end):
     # xlsx file search under a folder path
     
@@ -591,30 +548,43 @@ for number in range(start, end):
     for file_path in xlsx_files:
         if IMPORT:
             # import data
+            print(' ')
             print("import start")
+            t = time.time()  
             print("file path: {}".format(file_path))
             df = pd.read_excel(file_path)
             data_source = 'i-Control' # need to modify later
             
             # check the presence of turbidity in i-control excel file
             df = check_turbidity(folder_path,df)
+            elapsed = time.time() -t
+            print("elapsed time for import:{} seconds".format(int(elapsed)))
             print("import complete")
 
         if PREPROCESSING:
+            print(' ')
             print("PREPROCESSING start")
+            t = time.time()
             df_component, component_list = COMPONENT_D(df) # update COMPONENT_D
             df_param, df = PARAMETER_D(df) # update PARAMETER_D
             df_batchrun= BATCH_RUN(df,file_path) # update BATCH_RUN_D
             BATCH_COMPONENT_ASSOC(df_batchrun,component_list)
             df_result =RESULT_F(df, df_batchrun, data_source)
+            elapsed = time.time() -t
+            print("elapsed time for preprocessing:{} seconds".format(int(elapsed)))
             print("PREPROCESSING complete")
 
         if PUSH2SQL:
+            print(' ')
+            print("PUSH2SQL start")
+            t = time.time()
             conn, cursor= connect2SQL()
-            Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result)
+            Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result)
+            elapsed = time.time() -t
+            print("elapsed time for PUSE2SQL:{} seconds".format(int(elapsed)))
+            print("PUSH2SQL complete")
             conn.close()
-            print("Disconnected from SQL")
+            print("COMPLETE: {}".format(folder_path))
+            print("--------------------------------- END ---------------------------")
 
         #if PXRD:
-
-        
