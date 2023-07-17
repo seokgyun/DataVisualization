@@ -1,5 +1,5 @@
-# 070723
-# APPLIED FAST_EXECUTEMANY 
+# 071723
+# APPLIED PXRD
 import os 
 import numpy as np
 import pandas as pd    
@@ -9,7 +9,11 @@ import xml.etree.ElementTree as ET
 import pyodbc
 import glob
 import datetime
+from datetime import timedelta
 import time
+# to download a module
+# pip install pyexasol --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host=files.pythonhosted.org
+
 # send the pre-processed data to SQL
 # connect to SQL server
 def connect2SQL():
@@ -154,7 +158,7 @@ def Insert2RESULT_F_EXECUTEMANY(conn, cursor, df_result):
             (SELECT COMPONENT_KEY FROM COMPONENT_D WHERE COMPONENT_NM = ?),
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        cursor.fast_executemany = True
+        cursor.fast_executemany = False
         cursor.executemany(query, params_list)
         conn.commit()
 
@@ -208,8 +212,11 @@ def Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result):
 
     for row in df_result_new.itertuples(index=False):
         # Convert datetime value to desired format
-        datetime_val = datetime.datetime.strptime(row.DATETIME_VAL, '%m/%d/%Y %I:%M:%S %p')
-        formatted_datetime = datetime_val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        if row.DATETIME_VAL == 'Null':
+            formatted_datetime='2010-01-01 01:01:01.000'
+        else:
+            datetime_val = datetime.datetime.strptime(row.DATETIME_VAL, '%m/%d/%Y %I:%M:%S %p')
+            formatted_datetime = datetime_val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         params = (
             row.BATCH_RUN_KEY,
             row.PARAMETER_KEY,
@@ -228,10 +235,10 @@ def Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result):
             row.RELATIVE_TIME_HR
         )
         params_list.append(params)
-
+        #print(row)
     try:
         query = """
-            INSERT INTO RESULT_F_new (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
+            INSERT INTO RESULT_F (BATCH_RUN_KEY, PARAMETER_KEY, COMPONENT_KEY, DATA_SOURCE, DATA_SEQUENCE, FACT_ROW_SEQ, MASTER_VAL, STRING_VAL, NUMERIC_VAL, DATETIME_VAL, DATA_TYPE, UNIT_CD, RELATIVE_TIME, RELATIVE_TIME_S, RELATIVE_TIME_HR)
             VALUES (?,?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.fast_executemany = True
@@ -529,18 +536,117 @@ def BATCH_COMPONENT_ASSOC(df_batchrun,component_list):
     print("Insertion attempt to BATCH_COMPONENT_ASSOC_D is complete")    
     conn.close()       
 
-    # MAIN
+# def check_sample_iControl(df2):
+#     sample_time = []
+#     Issample = False
+#     for row in range(df2.shape[0]):
+#         if df2['Type'][row]=='Sample':
+#             sample_time.append(df2['Start Time'][row])
+#             Issample = True
+#             print('sample exists at {}'.format(df2['Start Time'][row]))
+#         elif 'sample' in df2['Action / Note / Sample'][row]:
+#             sample_time.append(df2['Start Time'][row])
+#             Issample = True
+#             print('sample exists at {}'.format(df2['Start Time'][row]))
+    
+#     if Issample == False:
+#         print('No sampling history in i-Control')
+    
+#     return sample_time
+
+def SEARCH_PXRD():
+    folder_path = r'C:\Users\iqr474.PHIBRED\OneDrive - Corteva\Desktop\DataVisualization\code\data\PXRD\AutomaticConversion\dat'
+    batch_run_id = df_batchrun['BATCH_RUN_ID'][0]
+    PXRD_files = glob.glob(folder_path + "/*" + batch_run_id+ "*")
+    PXRD_file = PXRD_files[0] # one only file
+    for PXRD_file in PXRD_files:
+        print("sample found: {}".format(PXRD_file))
+    return PXRD_file
+    
+def READ_PXRD(PXRD_file, sample_time):
+    print("IMPORT PXRD : {}".format(PXRD_file))
+    drywet = PXRD_file.split('_')[2]
+    df_PXRD = pd.read_csv(PXRD_file, delimiter='     ', header=None, names=['2*theta','Intensity'], engine= 'python')
+
+    PXRD = (df_PXRD, df_batchrun['BATCH_RUN_ID'][0], data_source, sample_time, drywet) # batch_run_id, data_source, sample_time, df_PXRD
+    return PXRD
+
+def RESULT_F_PXRD(PXRD):
+    print("PRE-PROCESS PXRD")
+    row_interval = 1
+    index = 0
+    df_PXRD = PXRD[0]
+    batch_run_id = PXRD[1]
+    data_source = PXRD[2]
+    sample_time = PXRD[3]
+    drywet = PXRD[4]
+    
+    # Parse the time string into a hour, min, sec
+    hours, minutes, seconds = map(int, sample_time.split(':')) # '%H:%M:%S'
+    # Calculate the total number of seconds
+    total_seconds = timedelta(hours=hours, minutes=minutes, seconds=seconds).total_seconds()
+    # Convert the total seconds to an integer
+    time_seconds = int(total_seconds)
+
+    # Create RESULT_F Table
+    result_column = ['BATCH_RUN_ID','PARAMETER_NM','COMPONENT_NM','DATA_SOURCE','DATA_SEQUENCE','FACT_ROW_SEQ','MASTER_VAL','STRING_VAL','NUMERIC_VAL','DATETIME_VAL','DATA_TYPE','UNIT_CD','RELATIVE_TIME','RELATIVE_TIME_S','RELATIVE_TIME_HR'] # 14 cols
+    df_result_PXRD=pd.DataFrame(columns=result_column)
+    new_rows = []
+
+    for row in range(0,df_PXRD.shape[0], row_interval): 
+        current_row = df_PXRD.iloc[row] # pd.Series   
+        for col in range(df_PXRD.shape[1]):
+            colname = current_row.index[col] # column name
+            
+            if colname =='2*theta':
+                value_PARAMETER_NM= colname
+                value_NUMERIC_VAL=df_PXRD[colname][row]
+                value_DATA_TYPE='float'
+                value_UNIT_CD='degree'
+            elif colname =='Intensity':
+                value_PARAMETER_NM= colname
+                value_NUMERIC_VAL=df_PXRD[colname][row]
+                value_DATA_TYPE='integer'
+                value_UNIT_CD='cts'
+            
+            value_BATCH_RUN_ID= batch_run_id
+            value_COMPONENT_NM= 'NotApplied'
+            value_DATA_SOURCE= data_source
+            index += 1
+            value_DATA_SEQUENCE= index
+            value_FACT_ROW_SEQ= row
+            value_MASTER_VAL= 'Null'
+
+            value_STRING_VAL= 'Null'
+            if 'dry' in drywet:
+                value_STRING_VAL= 'drycake'
+            elif 'wet' in drywet:
+                value_STRING_VAL= 'wetcake'
+                
+            datetime_val= 'Null'
+            relative_time = sample_time
+            relative_time_s = time_seconds
+            relative_time_hr = time_seconds/3600
+            new_rows.append([value_BATCH_RUN_ID, value_PARAMETER_NM, value_COMPONENT_NM, value_DATA_SOURCE, value_DATA_SEQUENCE, value_FACT_ROW_SEQ, value_MASTER_VAL, value_STRING_VAL, value_NUMERIC_VAL, datetime_val, value_DATA_TYPE, value_UNIT_CD, relative_time, relative_time_s, relative_time_hr])
+
+    new_df = pd.DataFrame(new_rows, columns=df_result_PXRD.columns)
+    df_result_PXRD = pd.concat([df_result_PXRD, new_df], ignore_index=True)
+
+    return df_result_PXRD
+
+# MAIN
 IMPORT        = True
 PREPROCESSING = True
-PUSH2SQL      = True
+PUSH2SQL      = False
 PXRD          = True
+PXRD_PUSH2SQL = True
 
-start = 9
+start =5
 end = 10
 for number in range(start, end):
     # xlsx file search under a folder path
     
-    folder_path = r'\\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-00'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
+    folder_path = r'\\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-00'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-003; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
     print("search excel files under the folder: {}".format(folder_path))
     # Use the glob function to search for .xlsx files in the folder
     xlsx_files = glob.glob(folder_path + "/*.xlsx")
@@ -585,6 +691,39 @@ for number in range(start, end):
             print("PUSH2SQL complete")
             conn.close()
             print("COMPLETE: {}".format(folder_path))
-            print("--------------------------------- END ---------------------------")
+            print("--------------------------------- i-Control END ---------------------------")
 
-        #if PXRD:
+        if PXRD:
+            print(' ')
+            print("PXRD start")
+            print("Turn IMPORT and PREPROCESSING to be TRUE")
+            print("Two Assumptions here:")
+            print("1. For all PXRD data, the samples were taken at the end of experiment")
+            print("2. All samples are drycake (if PXRD exists, One BATCH_RUN_ID -> One PXRD)")
+            data_source = 'PXRD' 
+            
+            # Read i-control file - recipe
+            df2 = pd.read_excel(file_path,sheet_name='Recipe')
+            # Check sample history
+            #sample_time_list = check_sample_iControl(df2)
+
+            # serach PXRD in folder
+            PXRD_file  = SEARCH_PXRD()
+            print('---> Assume that the sample was taken at the end of the experiment'.upper())
+            exp_end_time = df['Rel. Time'][df.shape[0]-1]
+            sample_time = exp_end_time
+            print('---> THE RELATIVE TIME: {}'.format(exp_end_time))
+            
+            # Read PXRD
+            #for PXRD_file in PXRD_files:
+            # import PXRD
+            PXRD = READ_PXRD(PXRD_file, sample_time)
+            # pre-processing
+            df_result_PXRD = RESULT_F_PXRD(PXRD)
+            
+            # push2sql
+            if PXRD_PUSH2SQL:
+                conn, cursor= connect2SQL()
+                Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result_PXRD)
+                conn.close()
+                print("--------------------------------- PXRD END ---------------------------")
