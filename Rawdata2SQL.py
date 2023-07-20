@@ -1,4 +1,4 @@
-# 071723
+# 072023
 # APPLIED PXRD
 import os 
 import numpy as np
@@ -207,7 +207,7 @@ def Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result):
     mapping_component = pd.DataFrame(rows, columns=columns)
     #print(mapping_batchrun.head())
     df_result_new  = pd.merge(mapping_component,df_result_new ,on='COMPONENT_NM')
-
+    #print(df_result_new.head())
     params_list = []
 
     for row in df_result_new.itertuples(index=False):
@@ -250,6 +250,12 @@ def Insert2RESULT_F_FAST_EXECUTEMANY(conn, cursor, df_result):
     except pyodbc.IntegrityError as e:
         print("IntegrityError: {}".format(e))
         conn.rollback()
+
+    # replace -999.999 -> Null 
+    query = """ update RESULT_F SET NUMERIC_VAL = Null where NUMERIC_VAL = -999.999 """
+    cursor.execute(query)
+    conn.commit()
+    
 
 def READ_SYNONYM_TABLE():
     # connect to pyexasol
@@ -425,8 +431,8 @@ def RESULT_F(df, df_batchrun, data_source):
             value_FACT_ROW_SEQ = row
 
             # Values
-            if pd.isna(current_row[col]):
-                value_NUMERIC_VAL = -999.999
+            if pd.isna(current_row[col]): 
+                value_NUMERIC_VAL = -999.999 # need to do this in sql: update RESULT_F SET NUMERIC_VAL = Null where NUMERIC_VAL = -999.999
             else:
                 value_NUMERIC_VAL = current_row[col]
             value_MASTER_VAL = 'Null'
@@ -641,12 +647,12 @@ PUSH2SQL      = False
 PXRD          = True
 PXRD_PUSH2SQL = True
 
-start =5
-end = 10
+start =74
+end = 76
 for number in range(start, end):
     # xlsx file search under a folder path
     
-    folder_path = r'\\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-00'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-003; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
+    folder_path = r'\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-0'+str(number) #\\elw16picdc01\Experiments\paul.larsen\XR-521 2021\E-176325-070; \\elw16picdc01\Experiments\paul.larsen\XR-521 2020\ENBK-176325-003; \\elw16picdc01\Experiments\johanna.strul\XDE-521\E-178359-023
     print("search excel files under the folder: {}".format(folder_path))
     # Use the glob function to search for .xlsx files in the folder
     xlsx_files = glob.glob(folder_path + "/*.xlsx")
@@ -720,7 +726,7 @@ for number in range(start, end):
             PXRD = READ_PXRD(PXRD_file, sample_time)
             # pre-processing
             df_result_PXRD = RESULT_F_PXRD(PXRD)
-            
+
             # push2sql
             if PXRD_PUSH2SQL:
                 conn, cursor= connect2SQL()
